@@ -128,6 +128,27 @@
       "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
     },
 
+    "DBSubnetANetwork" : {
+      "Description" : "Network and netmask for DB subnet",
+      "Type": "String",
+      "Default": "10.225.4.0 255.255.255.0",
+      "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
+    },
+
+    "DBSubnetBNetwork" : {
+      "Description" : "Network and netmask for DB subnet",
+      "Type": "String",
+      "Default": "10.225.5.0 255.255.255.0",
+      "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
+    },
+
+    "MGMTSubnetNetwork" : {
+      "Description" : "Network and netmask for MGMT subnet",
+      "Type": "String",
+      "Default": "10.225.6.0 255.255.255.0",
+      "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
+    },
+
     "VPNSubnetCIDR" : {
       "Description" : "CIDR block for App Servers subnet",
       "Type": "String",
@@ -646,15 +667,6 @@
       }
     },
 
-    "IPAddress" : {
-      "Type" : "AWS::EC2::EIP",
-      "DependsOn" : "AttachGateway",
-      "Properties" : {
-        "Domain" : "vpc",
-        "InstanceId" : { "Ref" : "VPNGatewayInstance" }
-      }
-    },
-
     "VPNInstanceSecurityGroup" : {
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
@@ -699,15 +711,15 @@
               }
             },
             "files" : {
-              "/etc/openvpn/keys/wds-demo-mgmt-vpn-CA.crt" : {
+              "/etc/openvpn/keys/wds-demo-CA.crt" : {
                 "authentication" : "S3AccessCreds",
                 "mode"    : "000400",
                 "owner"   : "root",
                 "group"   : "root",
-                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/wds-demo-mgmt-vpn-CA.crt" ] ] }
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/wds-demo-CA.crt" ] ] }
               },
 
-              "/etc/openvpn/keys/vpn-server.pem" : {
+              "/etc/openvpn/keys/vpn-server.crt" : {
                 "authentication" : "S3AccessCreds",
                 "mode"    : "000400",
                "owner"   : "root",
@@ -747,7 +759,7 @@
                   "port 1194", "\n",
                   "proto tcp", "\n",
                   "dev tun", "\n",
-                  "ca ./keys/wds-demo-mgmt-vpn-CA.crt", "\n",
+                  "ca ./keys/wds-demo-CA.crt", "\n",
                   "cert ./keys/vpn-server.crt", "\n",
                   "key ./keys/vpn-server.pem  # This file should be kept secret", "\n",
                   "crl-verify ./keys/crl.pem", "\n",
@@ -757,6 +769,9 @@
                   "push \"route ", { "Ref": "DMZSubnetNetwork" }, "\"", "\n",
                   "push \"route ", { "Ref": "AppSubnetANetwork" }, "\"", "\n",
                   "push \"route ", { "Ref": "AppSubnetBNetwork" }, "\"", "\n",
+                  "push \"route ", { "Ref": "DBSubnetANetwork" }, "\"", "\n",
+                  "push \"route ", { "Ref": "DBSubnetBNetwork" }, "\"", "\n",
+                  "push \"route ", { "Ref": "MGMTSubnetNetwork" }, "\"", "\n",
                   "keepalive 10 120", "\n",
                   "comp-lzo", "\n",
                   "user nobody", "\n",
@@ -787,10 +802,10 @@
                  ],
         "NetworkInterfaces" : [{
           "GroupSet"                 : [{ "Ref" : "VPNInstanceSecurityGroup" }],
-          "AssociatePublicIpAddress" : "false",
+          "AssociatePublicIpAddress" : "true",
           "DeviceIndex"              : "0",
           "DeleteOnTermination"      : "true",
-          "SubnetId"                 : { "Ref" : "MGMTSubnet" }
+          "SubnetId"                 : { "Ref" : "DMZSubnet" }
         }],
         "SourceDestCheck" : "false",
         "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
@@ -802,8 +817,8 @@
             "  exit 1\n",
             "}\n",
 
-            "echo 'vpn-mgmt.wdsdev.net' > /etc/hostname\n",
-            "hostname vpn-mgmt.dev-mwellth.com\n",
+            "echo 'demo-vpn.wdsdev.net' > /etc/hostname\n",
+            "hostname demo-vpn.wdsdev.net\n",
             "apt-get update\n",
             "apt-get -y install python-setuptools python-pip python-dev libffi-dev libssl-dev\n",
             "apt-get -y install libpam-google-authenticator\n",
@@ -842,30 +857,29 @@
       }
     },
 
-    "VPNInstanceDNSRecord" : {
+    "VPNGatewayInstanceDNSRecord" : {
       "Type" : "AWS::Route53::RecordSet",
-      "DependsOn" : "IPAddress",
+      "DependsOn" : "VPNGatewayInstance",
       "Properties" : {
         "HostedZoneName" : {
           "Fn::Join" : [ "", [
             { "Ref" : "DNSZoneName" }, "."
           ] ]
         },
-        "Comment" : "DNS name for VPN server instance.",
+        "Comment" : "DNS name for VPN Gatevay instance.",
         "Name" : {
          "Fn::Join" : [ "", [
-           "vpn-mgmt.",
-           {"Ref" : "DNSZoneName"}, "."
+          "demo-vpn.",
+          {"Ref" : "DNSZoneName"}, "."
          ] ]
         },
         "Type" : "A",
         "TTL" : "60",
         "ResourceRecords" : [
-          { "Ref" : "IPAddress" }
+          { "Fn::GetAtt" : [ "VPNGatewayInstance", "PrivateIp" ] }
         ]
       }
     }
-
 
  },
 
@@ -873,10 +887,6 @@
     "VPNIP" : {
       "Value" : { "Fn::Join" : [ "", [ { "Fn::GetAtt" : ["VPNGatewayInstance", "PublicIp"] }]]},
       "Description" : "Newly created vpn gateway public IP"
-    },
-    "VPNServerDNS" : {
-      "Value" : { "Fn::Join" : [ "", [ { "Ref" : "VPNInstanceDNSRecord" }]]},
-      "Description" : "Newly created VPN server DNS name"
     }
 
   }
