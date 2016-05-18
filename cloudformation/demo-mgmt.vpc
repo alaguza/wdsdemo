@@ -1,17 +1,9 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
 
-  "Description" : "This template creates management VPC for mHealth project.",
+  "Description" : "This template creates demo VPC for WDS project.",
 
   "Parameters" : {
-
-    "VPNInstanceType" : {
-      "Description" : "VPN Server EC2 instance type",
-      "Type" : "String",
-      "Default" : "t2.medium",
-      "AllowedValues" : [ "t2.micro", "t2.small", "t2.medium", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge" ],
-      "ConstraintDescription" : "must be a valid EC2 instance type."
-    },
 
     "ChefInstanceType" : {
       "Description" : "Chef Server EC2 instance type",
@@ -620,23 +612,31 @@
       }
     },
 
-    "VPNInstanceSecurityGroup" : {
-      "Type" : "AWS::EC2::SecurityGroup",
+    "DBSubnetARouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
       "Properties" : {
-        "VpcId" : { "Ref" : "VPC" },
-        "GroupDescription" : "Enable SSH access via port 22 and VPN via 1194",
-        "SecurityGroupIngress" : [
-          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation" }},
-          { "IpProtocol" : "tcp", "FromPort" : "1194", "ToPort" : "1194", "CidrIp" : { "Ref" : "SSHLocation" }},
-          { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "AppSubnetACIDR" }},
-          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetACIDR" }},
-          { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "AppSubnetBCIDR" }},
-          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetBCIDR" }}
-         ]
+        "SubnetId" : { "Ref" : "DBSubnetA" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
+      }
+    },
+
+    "DBSubnetBRouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "DBSubnetB" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
+      }
+    },
+
+    "MGMTSubnetRouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "MGMTSubnet" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
       }
     }
 
- },
+  },
 
   "Outputs" : {
   }
