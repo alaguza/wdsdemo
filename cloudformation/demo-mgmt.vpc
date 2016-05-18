@@ -1,7 +1,7 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
 
-  "Description" : "This template creates management VPC for mHealth project.",
+  "Description" : "This template creates demo VPC for WDS project.",
 
   "Parameters" : {
 
@@ -114,7 +114,7 @@
       "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
     },
 
-    "AppSubnetBNetwork" : {
+    "AppSubnetANetwork" : {
       "Description" : "Network and netmask for App subnet",
       "Type": "String",
       "Default": "10.225.2.0 255.255.255.0",
@@ -124,7 +124,7 @@
     "AppSubnetBNetwork" : {
       "Description" : "Network and netmask for App subnet",
       "Type": "String",
-      "Default": "10.225.2.0 255.255.255.0",
+      "Default": "10.225.3.0 255.255.255.0",
       "ConstraintDescription": "must be a valid IP network/mask of the form x.x.x.x x.x.x.x."
     },
 
@@ -149,7 +149,7 @@
     },
 
     "SecretsBucketName" : {
-      "Default" : "wds-demo-secrets",
+      "Default" : "wds-demo-secret",
       "Type" : "String",
       "Description" : "S3 bucket with secrets used in this template"
     },
@@ -157,7 +157,7 @@
     "InstallationsBucketName" : {
       "Default" : "wds-demo-install",
       "Type" : "String",
-      "Description" : "S3 bucket with windows installation files used in this template"
+      "Description" : "S3 bucket with installation files used in this template"
     },
 
     "BookshelfBucketName" : {
@@ -594,13 +594,23 @@
       }
     },
 
+    "VPNClientsRouteApp" : {
+      "Type" : "AWS::EC2::Route",
+      "DependsOn" : "VPNGatewayInstance",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "RouteTableApp" },
+        "DestinationCidrBlock" : { "Ref": "VPNSubnetCIDR" },
+        "InstanceId" : { "Ref" : "VPNGatewayInstance" }
+      }
+    },
+
     "DefaultRouteApp" : {
       "Type" : "AWS::EC2::Route",
       "DependsOn" : "InternetGateway",
       "Properties" : {
         "RouteTableId" : { "Ref" : "RouteTableApp" },
         "DestinationCidrBlock" : "0.0.0.0/0",
-        "GatewayId" : { "Ref" : "InternetGateway" }
+        "InstanceId" : { "Ref" : "VPNGatewayInstance" }
       }
     },
 
@@ -620,6 +630,31 @@
       }
     },
 
+    "DBSubnetARouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "DBSubnetA" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
+      }
+    },
+
+    "DBSubnetBRouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "DBSubnetB" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
+      }
+    },
+
+    "IPAddress" : {
+      "Type" : "AWS::EC2::EIP",
+      "DependsOn" : "AttachGateway",
+      "Properties" : {
+        "Domain" : "vpc",
+        "InstanceId" : { "Ref" : "VPNGatewayInstance" }
+      }
+    },
+
     "VPNInstanceSecurityGroup" : {
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
@@ -634,10 +669,215 @@
           { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetBCIDR" }}
          ]
       }
+    },
+
+   "VPNGatewayInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "DependsOn" : "AttachGateway",
+      "Metadata" : {
+        "AWS::CloudFormation::Authentication": {
+            "S3AccessCreds" : {
+                "type": "s3",
+                "buckets": [ { "Ref": "SecretsBucketName" } ],
+                "roleName": { "Ref": "IAMVPNRole" }
+            }
+        },
+        "Comment" : "Setup OpenVPN",
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+            "packages" : {
+              "apt" : {
+                "vim"             : [],
+                "openvpn"         : [],
+                "unzip"           : [],
+                "python-pip"      : [],
+                "libwww-perl"     : [],
+                "libswitch-perl"  : [],
+                "ntp"             : [],
+                "libdatetime-perl": [],
+                "awscli"          : []
+              }
+            },
+            "files" : {
+              "/etc/openvpn/keys/wds-demo-mgmt-vpn-CA.crt" : {
+                "authentication" : "S3AccessCreds",
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root",
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/wds-demo-mgmt-vpn-CA.crt" ] ] }
+              },
+
+              "/etc/openvpn/keys/vpn-server.pem" : {
+                "authentication" : "S3AccessCreds",
+                "mode"    : "000400",
+               "owner"   : "root",
+                "group"   : "root",
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/vpn-server.crt" ] ] }
+              },
+
+              "/etc/openvpn/keys/vpn-server.pem" : {
+                "authentication" : "S3AccessCreds",
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root",
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/vpn-server.pem" ] ] }
+              },
+
+              "/etc/openvpn/keys/crl.pem" : {
+                "authentication" : "S3AccessCreds",
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root",
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-us-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/crl.pem" ] ] }
+              },
+
+              "/etc/openvpn/keys/2048.pem" : {
+                "authentication" : "S3AccessCreds",
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root",
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/dh2048.pem" ] ] }
+              },
+
+              "/etc/openvpn/server.conf" : {
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root",
+                "content" : { "Fn::Join" : ["", [
+                  "port 1194", "\n",
+                  "proto tcp", "\n",
+                  "dev tun", "\n",
+                  "ca ./keys/wds-demo-mgmt-vpn-CA.crt", "\n",
+                  "cert ./keys/vpn-server.crt", "\n",
+                  "key ./keys/vpn-server.pem  # This file should be kept secret", "\n",
+                  "crl-verify ./keys/crl.pem", "\n",
+                  "dh ./keys/2048.pem", "\n",
+                  "server ", { "Ref" : "VPNSubnetNetwork" }, "\n",
+                  "ifconfig-pool-persist ipp.txt", "\n",
+                  "push \"route ", { "Ref": "DMZSubnetNetwork" }, "\"", "\n",
+                  "push \"route ", { "Ref": "AppSubnetANetwork" }, "\"", "\n",
+                  "push \"route ", { "Ref": "AppSubnetBNetwork" }, "\"", "\n",
+                  "keepalive 10 120", "\n",
+                  "comp-lzo", "\n",
+                  "user nobody", "\n",
+                  "group nogroup", "\n",
+                  "persist-key", "\n",
+                  "persist-tun", "\n",
+                  "status openvpn-status.log", "\n",
+                  "log openvpn.log", "\n",
+                  "verb 0", "\n"
+                ]]}
+              }
+            },
+
+            "sources" : {
+              "/usr/local/etc" : "http://ec2-downloads.s3.amazonaws.com/cloudwatch-samples/CloudWatchMonitoringScripts-v1.1.0.zip"
+            }
+          }
+        }
+      },
+      "Properties" : {
+        "ImageId" : "ami-f95ef58a",
+        "InstanceType" : { "Ref" : "VPNInstanceType" },
+        "Monitoring" : "false",
+        "KeyName" : { "Ref" : "KeyNameMGMT" },
+        "IamInstanceProfile" : { "Ref" : "IAMVPNInstanceProfile" },
+        "Tags" : [  { "Key" : "Environment", "Value" : { "Ref" : "AWS::StackName"} },
+                    { "Key": "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "NameTag" }, "-vpnserver" ] ] } }
+                 ],
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "VPNInstanceSecurityGroup" }],
+          "AssociatePublicIpAddress" : "false",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : { "Ref" : "MGMTSubnet" }
+        }],
+        "SourceDestCheck" : "false",
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+            "#!/bin/bash -xe\n",
+
+            "function error_exit\n",
+            "{\n",
+           "  cfn-signal -e 1 -r \"$1\" '", {"Ref" : "VPNWaitHandle"}, "'\n",
+            "  exit 1\n",
+            "}\n",
+
+            "echo 'vpn-mgmt.wdsdev.net' > /etc/hostname\n",
+            "hostname vpn-mgmt.dev-mwellth.com\n",
+            "apt-get update\n",
+            "apt-get -y install python-setuptools python-pip python-dev libffi-dev libssl-dev\n",
+            "apt-get -y install libpam-google-authenticator\n",
+            "pip install requests[security]\n",
+            "pip install --upgrade ndg-httpsclient\n",
+            "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
+            "cfn-init --region ", { "Ref" : "AWS::Region" },
+            "    -s ", { "Ref" : "AWS::StackId" }, " -r VPNGatewayInstance ", "|| error_exit 'vpncfn-init failed'\n",
+            "service openvpn start || error_exit 'service openvpn failed to start'\n",
+            "#setup NAT masquerading\n",
+            "sed -i -e 's/DEFAULT_FORWARD_POLICY=\"DROP\"/DEFAULT_FORWARD_POLICY=\"ACCEPT\"/' /etc/default/ufw\n",
+            "sed -i -e \"s%#net/ipv4/ip_forward=1%net/ipv4/ip_forward=1%\" /etc/ufw/sysctl.conf\n",
+            "sysctl -p /etc/ufw/sysctl.conf\n",
+  "if grep \"NAT settings\" /etc/ufw/before.rules; then echo \"NAT Setting are already there, will not modify (modification not supported)\"; else sed -i -e \"s%# Don't delete these required lines, otherwise there will be errors%# NAT settings\\n*nat\\n:POSTROUTING ACCEPT [0:0]\\n# NAT traffic from VPC\\n-A POSTROUTING -s 10.226.1.0/24 -d 10.225.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.226.1.0/24 -d 10.225.2.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.1.0/24 -d 10.226.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.2.0/24 -d 10.226.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.0.0/16 -o eth0 -j MASQUERADE\\nCOMMIT\\n\\n# Don't delete these required lines, otherwise there will be errors\\n%\" /etc/ufw/before.rules; fi\n",
+            "ufw allow ssh; ufw allow 1194; echo y | ufw enable || error_exit 'service ufw failed to start'\n",
+            "# tag volume\n",
+            "Region=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP \"(?<=\\\"region\\\" : \\\")[^\\\"]+\")\n",
+            "aws ec2 create-tags --resources $(aws ec2 describe-instances --instance-ids $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --region $Region | grep -oP \"(?<=\\\"VolumeId\\\": \\\")[^\\\"]+\") --tags Key=Environment,Value=",{"Ref" : "AWS::StackName"}," --region $Region\n",
+            "cfn-signal -e $? -r \"firewall setup complete\" '", {"Ref" : "VPNWaitHandle"}, "'\n"
+        ]]}}
+      }
+    },
+
+    "VPNWaitHandle" : {
+        "Type" : "AWS::CloudFormation::WaitConditionHandle",
+        "Properties" : {
+        }
+    },
+
+    "VPNWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "VPNGatewayInstance",
+      "Properties" : {
+        "Handle" : {"Ref" : "VPNWaitHandle"},
+        "Timeout" : "900"
+      }
+    },
+
+    "VPNInstanceDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "DependsOn" : "IPAddress",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Comment" : "DNS name for VPN server instance.",
+        "Name" : {
+         "Fn::Join" : [ "", [
+           "vpn-mgmt.",
+           {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "Type" : "A",
+        "TTL" : "60",
+        "ResourceRecords" : [
+          { "Ref" : "IPAddress" }
+        ]
+      }
     }
+
 
  },
 
   "Outputs" : {
+    "VPNIP" : {
+      "Value" : { "Fn::Join" : [ "", [ { "Fn::GetAtt" : ["VPNGatewayInstance", "PublicIp"] }]]},
+      "Description" : "Newly created vpn gateway public IP"
+    },
+    "VPNServerDNS" : {
+      "Value" : { "Fn::Join" : [ "", [ { "Ref" : "VPNInstanceDNSRecord" }]]},
+      "Description" : "Newly created VPN server DNS name"
+    }
+
   }
 }
