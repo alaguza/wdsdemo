@@ -1,0 +1,12 @@
+{
+  "name": "prod",
+  "description": "Role definition for prod instances",
+  "default_attributes": {
+    "wds-play": {
+      "version": "2.0.4"
+    }
+  },
+  "run_list": [
+    "recipe[wds-play]"
+  ]
+}

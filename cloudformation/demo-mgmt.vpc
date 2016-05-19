@@ -175,7 +175,7 @@
       "Description" : "S3 bucket with secrets used in this template"
     },
 
-    "InstallationsBucketName" : {
+    "InstallBucketName" : {
       "Default" : "wds-demo-install",
       "Type" : "String",
       "Description" : "S3 bucket with installation files used in this template"
@@ -309,6 +309,8 @@
                      ],
                 "Resource": [
                               { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "SecretsBucketName" }, "/", { "Ref" : "SecretsChefFolder" } , "/" ] ] },
+                              { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "InstallBucketName" }, "/" ] ] },
+                              { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "InstallBucketName" }, "/*" ] ] },
                               { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "SecretsBucketName" }, "/", { "Ref" : "SecretsChefFolder" } , "/*" ] ] }
                   ]
                }
@@ -667,6 +669,14 @@
       }
     },
 
+    "MGMTSubnetRouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "MGMTSubnet" },
+        "RouteTableId" : { "Ref" : "RouteTableApp" }
+      }
+    },
+
     "VPNInstanceSecurityGroup" : {
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
@@ -675,15 +685,17 @@
         "SecurityGroupIngress" : [
           { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation" }},
           { "IpProtocol" : "tcp", "FromPort" : "1194", "ToPort" : "1194", "CidrIp" : { "Ref" : "SSHLocation" }},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "MGMTSubnetCIDR" }},
+          { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "MGMTSubnetCIDR" }},
           { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "AppSubnetACIDR" }},
           { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetACIDR" }},
           { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "AppSubnetBCIDR" }},
           { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetBCIDR" }}
-         ]
+        ]
       }
     },
 
-   "VPNGatewayInstance" : {
+    "VPNGatewayInstance" : {
       "Type" : "AWS::EC2::Instance",
       "DependsOn" : "AttachGateway",
       "Metadata" : {
@@ -832,7 +844,7 @@
             "sed -i -e 's/DEFAULT_FORWARD_POLICY=\"DROP\"/DEFAULT_FORWARD_POLICY=\"ACCEPT\"/' /etc/default/ufw\n",
             "sed -i -e \"s%#net/ipv4/ip_forward=1%net/ipv4/ip_forward=1%\" /etc/ufw/sysctl.conf\n",
             "sysctl -p /etc/ufw/sysctl.conf\n",
-  "if grep \"NAT settings\" /etc/ufw/before.rules; then echo \"NAT Setting are already there, will not modify (modification not supported)\"; else sed -i -e \"s%# Don't delete these required lines, otherwise there will be errors%# NAT settings\\n*nat\\n:POSTROUTING ACCEPT [0:0]\\n# NAT traffic from VPC\\n-A POSTROUTING -s 10.226.1.0/24 -d 10.225.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.226.1.0/24 -d 10.225.2.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.1.0/24 -d 10.226.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.2.0/24 -d 10.226.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.0.0/16 -o eth0 -j MASQUERADE\\nCOMMIT\\n\\n# Don't delete these required lines, otherwise there will be errors\\n%\" /etc/ufw/before.rules; fi\n",
+  "if grep \"NAT settings\" /etc/ufw/before.rules; then echo \"NAT Setting are already there, will not modify (modification not supported)\"; else sed -i -e \"s%# Don't delete these required lines, otherwise there will be errors%# NAT settings\\n*nat\\n:POSTROUTING ACCEPT [0:0]\\n# NAT traffic from VPC\\n-A POSTROUTING -s 10.226.1.0/24 -d 10.225.0.0/21 -j ACCEPT\\n-A POSTROUTING -s 10.225.0.0/21 -d 10.226.1.0/24 -j ACCEPT\\n-A POSTROUTING -s 10.225.0.0/16 -o eth0 -j MASQUERADE\\nCOMMIT\\n\\n# Don't delete these required lines, otherwise there will be errors\\n%\" /etc/ufw/before.rules; fi\n",
             "ufw allow ssh; ufw allow 1194; echo y | ufw enable || error_exit 'service ufw failed to start'\n",
             "# tag volume\n",
             "Region=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP \"(?<=\\\"region\\\" : \\\")[^\\\"]+\")\n",
@@ -879,15 +891,256 @@
           { "Fn::GetAtt" : [ "VPNGatewayInstance", "PrivateIp" ] }
         ]
       }
+    },
+
+    "ChefServerInstanceSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "GroupDescription" : "Enable SSH access via port 22 and chef server api access via port 443",
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "VPNSubnetCIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetACIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "AppSubnetBCIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "DBSubnetACIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "DBSubnetBCIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "MGMTSubnetCIDR"}}
+         ]
+      }
+    },
+
+    "CfnUser" : {
+      "Type" : "AWS::IAM::User",
+      "Properties" : {
+        "Path": "/",
+        "Policies": [ {
+          "PolicyName": "root",
+          "PolicyDocument": { "Statement": [ {
+            "Effect":"Allow",
+            "Action":"cloudformation:DescribeStackResource",
+            "Resource":"*"
+          } ] }
+        } ]
+      }
+    },
+
+    "AccessKey" : {
+      "Type" : "AWS::IAM::AccessKey",
+      "Properties" : {
+        "UserName" : { "Ref" : "CfnUser" }
+      }
+    },
+
+    "BookshelfBucketPolicy" : {
+      "Type" : "AWS::S3::BucketPolicy",
+      "Properties" : {
+        "PolicyDocument": {
+          "Version"      : "2008-10-17",
+          "Id"           : "BookshelfWritePolicy",
+          "Statement"    : [
+            {
+              "Action"     : ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+              "Effect"     : "Allow",
+              "Resource"   : { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref" : "BookshelfBucketName"} , "/*"]]},
+              "Principal"  : { "AWS": {"Fn::GetAtt" : ["CfnUser", "Arn"]} }
+            },
+            {
+              "Action"     : ["s3:ListBucket"],
+              "Effect"     : "Allow",
+              "Resource"   : { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref" : "BookshelfBucketName"}]]},
+              "Principal"  : { "AWS": {"Fn::GetAtt" : ["CfnUser", "Arn"]} }
+            }
+          ]
+        },
+        "Bucket" : {"Ref" : "BookshelfBucketName"}
+      }
+    },
+
+    "ChefServerInstance": {
+      "Type": "AWS::EC2::Instance",
+      "DependsOn" : [ "VPNGatewayInstance", "VPNClientsRouteApp", "VPNWaitCondition" ],
+      "Metadata" : {
+        "AWS::CloudFormation::Authentication": {
+            "S3AccessCreds" : {
+                "type": "s3",
+                "buckets": [ { "Ref": "SecretsBucketName" } ],
+                "roleName": { "Ref": "IAMChefRole" }
+            }
+        },
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+            "packages" : {
+              "apt" : {
+                "awscli"          : [],
+                "unzip"           : [],
+                "libwww-perl"     : [],
+                "libswitch-perl"  : [],
+                "libdatetime-perl": [],
+                "git"             : [],
+                "ntp"             : [],
+                "chef"            : []
+              }
+            },
+            "files" : {
+              "/home/ubuntu/chef-server-core_12.6.0-1_amd64.deb" : {
+                "source" : "https://web-dl.packagecloud.io/chef/stable/packages/ubuntu/trusty/chef-server-core_12.6.0-1_amd64.deb",
+                "mode"   : "000664",
+                "owner"  : "ubuntu",
+                "group"  : "ubuntu"
+              },
+              "/etc/opscode/chef-server.rb" : {
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root",
+                "content" : { "Fn::Join" : ["", [
+                  "bookshelf['enable'] = false", "\n",
+                  "bookshelf['external_url'] = 'https://s3-eu-west-1.amazonaws.com'", "\n",
+                  "bookshelf['vip'] = 's3-us-west-2.amazonaws.com'\n",
+                  "bookshelf['access_key_id'] = '", { "Ref" : "AccessKey" }, "'\n",
+                  "bookshelf['secret_access_key'] = '", { "Fn::GetAtt": ["AccessKey", "SecretAccessKey"]} , "'\n",
+                  "opscode_erchef['s3_bucket'] = '", { "Ref" : "BookshelfBucketName" }, "'\n"
+                ]]}
+              },
+              "/root/.chef/knife.rb" : {
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root",
+                "content" : { "Fn::Join" : ["", [
+                  "node_name                'admin'", "\n",
+                  "client_key               '/etc/chef/client.pem'", "\n",
+                  "chef_server_url          'https://chef.wdsdev.net/organizations/wdsdemo'", "\n",
+                  "cookbook_path            '/root/wdsdemo/cookbooks'", "\n"
+               ]]}
+              }
+            },
+            "sources" : {
+              "/usr/local/etc" : "http://ec2-downloads.s3.amazonaws.com/cloudwatch-samples/CloudWatchMonitoringScripts-v1.1.0.zip"
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId" : "ami-f95ef58a",
+        "InstanceType" : { "Ref" : "ChefInstanceType" },
+        "Monitoring" : "false",
+        "KeyName" : { "Ref" : "KeyNameMGMT" },
+        "IamInstanceProfile" : { "Ref" : "IAMChefInstanceProfile" },
+        "Tags" : [  { "Key" : "Environment", "Value" : { "Ref" : "AWS::StackName"} },
+                    { "Key": "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "NameTag" }, "-chef-server" ] ] } }
+                 ],
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "ChefServerInstanceSecurityGroup" }],
+          "AssociatePublicIpAddress" : "false",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : { "Ref" : "MGMTSubnet" }
+        }],
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+            "#!/bin/bash -xe\n",
+
+            "function error_exit\n",
+            "{\n",
+            "  cfn-signal -e 1 -r \"$1\" '", {"Ref" : "ChefWaitHandle"}, "'\n",
+            "  exit 1\n",
+            "}\n",
+
+            "echo 'chef.wdsdev.net' > /etc/hostname\n",
+            "hostname chef.wdsdev.net\n",
+            "apt-get update\n",
+            "apt-get -y install python-setuptools python-pip python-dev libffi-dev libssl-dev\n",
+            "pip install requests[security]\n",
+            "pip install --upgrade ndg-httpsclient\n",
+            "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
+            "cfn-init --region ", { "Ref" : "AWS::Region" },
+            "    -v -s ", { "Ref" : "AWS::StackId" }, " -r ChefServerInstance ",
+            "         --access-key ", { "Ref" : "AccessKey" },
+            "         --secret-key ", {"Fn::GetAtt": ["AccessKey", "SecretAccessKey"]},
+            "         --region     ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+
+            "# Bootstrap chef\n",
+            "dpkg -i /home/ubuntu/chef-server-core_12.6.0-1_amd64.deb >> /tmp/chef_install.log 2>&1 || error_exit 'Failed to install chef server'\n",
+            "sleep 5\n",
+            "sudo /usr/bin/chef-server-ctl reconfigure > /tmp/chef_configure.log 2>&1 || error_exit 'Failed to configure chef server'\n",
+            "sleep 5\n",
+            "sudo chef-server-ctl start\n",
+            "sleep 10\n",
+            "admin_pass=`openssl rand -base64 32`\n",
+            "echo $admin_pass > /tmp/chef_admin_pass.txt\n",
+            "chef-server-ctl user-create admin admin admin artur.laguza@wds.co $admin_pass --filename /tmp/chef_admin.pem\n",
+            "chef-server-ctl org-create wds \"wds\" --association_user admin --filename /tmp/organization.pem\n",
+            "aws s3api put-object --bucket wds-demo-secret/chef --key chef-admin.pem --body /tmp/chef_admin.pem\n",
+            "aws s3api put-object --bucket wds-demo-secret/chef --key chef-organization.pem --body /tmp/organization.pem\n",
+            "aws s3api put-object --bucket wds-demo-secret/chef --key chef-admin-pass.txt --body /tmp/chef_admin_pass.txt\n",
+            "curl -k -s -o /dev/null https://localhost:443 || error_exit 'Failed to start chef server'\n",
+            "#chef server bootstrap\n",
+            "#echo -e \"Host github.com\n\tStrictHostKeyChecking no\n\" >> ~/.ssh/config\n",
+            "sleep 5\n",
+            "cp /tmp/chef_admin.pem /etc/chef/client.pem\n",
+            "cd /root\n",
+            "git clone https://github.com/alaguza/wdsdemo.git || error_exit\n",
+            "cd wdsdemo && git checkout feature/chefserver || error_exit\n",
+            "git pull\n",
+            "cd cookbooks || error_exit\n",
+            "for cookbook in `echo */ | tr -d \"/\"`; do var=$var\" \"$cookbook; done\n",
+            "knife cookbook upload $var\n",
+            "cd ../\n",
+            "for environment in `ls environments/*.json`; do knife environment from file $environment; done\n",
+            "for role in `ls roles/*.json`; do knife role from file $role; done\n",
+            "\n",
+            "# tag volume\n",
+            "Region=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP \"(?<=\\\"region\\\" : \\\")[^\\\"]+\")\n",
+            "aws ec2 create-tags --resources $(aws ec2 describe-instances --instance-ids $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --region $Region | grep -oP \"(?<=\\\"VolumeId\\\": \\\")[^\\\"]+\") --tags Key=Environment,Value=",{"Ref" : "AWS::StackName"}," --region $Region\n",
+            "# If all went well, signal success\n",
+            "cfn-signal -e 0 -r \"chef setup complete\" '", {"Ref" : "ChefWaitHandle"}, "'\n"
+        ]]}}
+      }
+    },
+
+    "ChefWaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle",
+      "Properties" : {
+      }
+    },
+
+    "ChefWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "ChefServerInstance",
+      "Properties" : {
+        "Handle" : {"Ref" : "ChefWaitHandle"},
+        "Timeout" : "900"
+      }
+    },
+
+    "ChefServerInstanceDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Comment" : "DNS name for Chef server instance.",
+        "Name" : {
+         "Fn::Join" : [ "", [
+          "chef.",
+          {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "Type" : "A",
+        "TTL" : "60",
+        "ResourceRecords" : [
+          { "Fn::GetAtt" : [ "ChefServerInstance", "PrivateIp" ] }
+        ]
+      }
     }
 
- },
+  },
 
   "Outputs" : {
     "VPNIP" : {
       "Value" : { "Fn::Join" : [ "", [ { "Fn::GetAtt" : ["VPNGatewayInstance", "PublicIp"] }]]},
       "Description" : "Newly created vpn gateway public IP"
     }
-
   }
 }
