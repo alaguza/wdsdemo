@@ -1,0 +1,15 @@
+{
+  "name": "uat",
+  "description": "wds demo uat env",
+  "default_attributes": {
+    "cookbook": {
+      "var": "data"
+    }
+  },
+  "override_attributes": {
+    "java": {
+      "install_flavour": "openjdk",
+      "jdk_version": "8"
+    }
+  }
+}

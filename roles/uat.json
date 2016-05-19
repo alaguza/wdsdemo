@@ -1,0 +1,13 @@
+{
+  "name": "mrx-mongodb-slave",
+  "description": "Role definition for mRx MongoDB Slave",
+  "default_attributes": {
+    "mrx-mongo": {
+      "type": "slave",
+      "master_hostname": "PRDMRDBNM01.aws.gomrx.com"
+    }
+  },
+  "run_list": [
+    "recipe[mrx-mongo]"
+  ]
+}
