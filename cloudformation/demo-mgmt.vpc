@@ -752,7 +752,7 @@
                 "mode"    : "000644",
                 "owner"   : "root",
                 "group"   : "root",
-                "source"  :  { "Fn::Join" : [ "", [ "https://s3-us-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/crl.pem" ] ] }
+                "source"  :  { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/vpngw/crl.pem" ] ] }
               },
 
               "/etc/openvpn/keys/2048.pem" : {
@@ -984,7 +984,7 @@
             },
             "files" : {
               "/home/ubuntu/chef-server-core_12.6.0-1_amd64.deb" : {
-                "source" : "https://web-dl.packagecloud.io/chef/stable/packages/ubuntu/trusty/chef-server-core_12.6.0-1_amd64.deb",
+                "source" : { "Fn::Join" : [ "", [ "https://s3-eu-west-1.amazonaws.com/", { "Ref" : "SecretsBucketName" }, "/chef-server-core_12.6.0-1_amd64.deb" ] ] },
                 "mode"   : "000664",
                 "owner"  : "ubuntu",
                 "group"  : "ubuntu"
@@ -996,7 +996,7 @@
                 "content" : { "Fn::Join" : ["", [
                   "bookshelf['enable'] = false", "\n",
                   "bookshelf['external_url'] = 'https://s3-eu-west-1.amazonaws.com'", "\n",
-                  "bookshelf['vip'] = 's3-us-west-2.amazonaws.com'\n",
+                  "bookshelf['vip'] = 's3-eu-west-1.amazonaws.com'\n",
                   "bookshelf['access_key_id'] = '", { "Ref" : "AccessKey" }, "'\n",
                   "bookshelf['secret_access_key'] = '", { "Fn::GetAtt": ["AccessKey", "SecretAccessKey"]} , "'\n",
                   "opscode_erchef['s3_bucket'] = '", { "Ref" : "BookshelfBucketName" }, "'\n"
@@ -1062,9 +1062,9 @@
             "dpkg -i /home/ubuntu/chef-server-core_12.6.0-1_amd64.deb >> /tmp/chef_install.log 2>&1 || error_exit 'Failed to install chef server'\n",
             "sleep 5\n",
             "sudo /usr/bin/chef-server-ctl reconfigure > /tmp/chef_configure.log 2>&1 || error_exit 'Failed to configure chef server'\n",
-            "sleep 5\n",
-            "sudo chef-server-ctl start\n",
             "sleep 10\n",
+            "sudo chef-server-ctl start\n",
+            "sleep 15\n",
             "admin_pass=`openssl rand -base64 32`\n",
             "echo $admin_pass > /tmp/chef_admin_pass.txt\n",
             "chef-server-ctl user-create admin admin admin artur.laguza@wds.co $admin_pass --filename /tmp/chef_admin.pem\n",
@@ -1073,21 +1073,6 @@
             "aws s3api put-object --bucket wds-demo-secret/chef --key chef-organization.pem --body /tmp/organization.pem\n",
             "aws s3api put-object --bucket wds-demo-secret/chef --key chef-admin-pass.txt --body /tmp/chef_admin_pass.txt\n",
             "curl -k -s -o /dev/null https://localhost:443 || error_exit 'Failed to start chef server'\n",
-            "#chef server bootstrap\n",
-            "#echo -e \"Host github.com\n\tStrictHostKeyChecking no\n\" >> ~/.ssh/config\n",
-            "sleep 5\n",
-            "cp /tmp/chef_admin.pem /etc/chef/client.pem\n",
-            "cd /root\n",
-            "git clone https://github.com/alaguza/wdsdemo.git || error_exit\n",
-            "cd wdsdemo && git checkout feature/chefserver || error_exit\n",
-            "git pull\n",
-            "cd cookbooks || error_exit\n",
-            "for cookbook in `echo */ | tr -d \"/\"`; do var=$var\" \"$cookbook; done\n",
-            "knife cookbook upload $var\n",
-            "cd ../\n",
-            "for environment in `ls environments/*.json`; do knife environment from file $environment; done\n",
-            "for role in `ls roles/*.json`; do knife role from file $role; done\n",
-            "\n",
             "# tag volume\n",
             "Region=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP \"(?<=\\\"region\\\" : \\\")[^\\\"]+\")\n",
             "aws ec2 create-tags --resources $(aws ec2 describe-instances --instance-ids $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --region $Region | grep -oP \"(?<=\\\"VolumeId\\\": \\\")[^\\\"]+\") --tags Key=Environment,Value=",{"Ref" : "AWS::StackName"}," --region $Region\n",
