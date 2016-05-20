@@ -1,0 +1,25 @@
+#!/bin/bash
+. ~/.environment
+
+INSTANCE=<%= instance %>
+PLAY_VERSION=<%= play_ver %>
+MODE=<%= mode %>
+USER_NAME =<%= user %>
+
+if [ -z $INSTANCE ]; then
+   echo "Please specify a Play! application instance folder name, e.g. $0 wds"
+   exit 1
+fi
+
+pushd /home/$USER_NAME/$INSTANCE/server/
+
+if [ -d "precompiled" ]
+        then
+                echo "Starting Play! in precompiled mode"
+                /usr/local/$PLAY_VERSION/play start --%$MODE -Dprecompiled=true
+        else
+                echo "Starting Play!"
+                /usr/local/$PLAY_VERSION/play start --%$MODE
+fi
+
+echo "ALIVE">/home/$USER_NAME/$INSTANCE/server/public/alive.html

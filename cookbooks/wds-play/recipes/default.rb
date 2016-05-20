@@ -2,22 +2,21 @@
 # Cookbook Name:: wds-play
 # Recipe:: default
 #
-# Copyright 2016, YOUR_COMPANY_NAME
+# Copyright 2016, Artur Laguza
 #
 # All rights reserved - Do Not Redistribute
 #
 
-
-template '#{node['wds-play']['runscript_path']}/play-run.sh' do
-  source 'play-run.sh.erb'
+remote_file "#{node['wds-play']['play_path']}/#{node['wds-play']['play_ver']}.zip" do
+  source "#{node['wds-play']['play_source']}/#{node['wds-play']['play_ver']}.zip"
   owner 'root'
   group 'root'
   mode '0755'
+  action :create
 end
 
-file '/opt/install/play/#{node['wds-play']['play_ver']}' do
-  content '<html>This is a placeholder for the home page.</html>'
-  mode '0755'
-  owner 'web_admin'
-  group 'web_admin'
+zipfile "#{node['wds-play']['play_path']}/#{node['wds-play']['play_ver']}.zip" do
+  into "#{node['wds-play']['play_path']}"
 end
+
+

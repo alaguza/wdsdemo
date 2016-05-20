@@ -1,13 +1,22 @@
 {
-  "name": "mrx-mongodb-slave",
-  "description": "Role definition for mRx MongoDB Slave",
+  "name": "uat",
+  "description": "Role definition for Play server",
   "default_attributes": {
-    "mrx-mongo": {
-      "type": "slave",
-      "master_hostname": "PRDMRDBNM01.aws.gomrx.com"
+    "wds-play": {
+      "username": "ubuntu"
+    }
+  },
+  "override_attributes": {
+    "java": {
+      "install_flavour": "oracle",
+      "jdk_version" : "8",
+      "oracle": {
+        "accept_oracle_download_terms": true
+      }
     }
   },
   "run_list": [
-    "recipe[mrx-mongo]"
+    "recipe[java]"
+    "recipe[wds-play]"
   ]
 }

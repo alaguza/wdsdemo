@@ -1,0 +1,37 @@
+#!/bin/bash
+. ~/.environment
+LOOP=0
+
+INSTANCE=<%= instance %>
+USER_NAME=<%= user %>
+
+if [ -z $INSTANCE ]; then
+   echo "Please specify a Play! application instance folder name, e.g. $0 wds"
+   exit 1
+fi
+
+pushd /home/$USER_NAME/$INSTANCE/server/
+rm -f /home/$USER_NAME/$INSTANCE/server/public/alive.html
+/usr/local/play/play stop
+
+if [ -e /home/$USER_NAME/$INSTANCE/server/server.pid ];
+        then
+                rm -f /home/$USER_NAME/$INSTANCE/server/server.pid
+fi
+
+while true
+do
+if [ $LOOP -lt 15 ];
+        then
+                if [ `ps -ef | grep $1 | grep java | awk '{print $2}' | wc -l` -gt 0 ];
+                        then
+                                LOOP=$(( $LOOP + 1 ))
+                                echo -n "."; sleep 1
+                        else
+                                echo;echo "<%= instance %> stopped";exit 0
+                fi
+        else
+                PID=`ps -ef | grep <%= instance %> | grep java | awk '{print $2}'`
+                echo;echo "$1 failed to stop, killing process $PID"; kill -9 $PID; exit 0
+fi
+done
