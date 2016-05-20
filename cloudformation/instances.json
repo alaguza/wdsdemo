@@ -1,0 +1,392 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "This template creates demo VPC for WDS project.",
+
+  "Parameters" : {
+
+    "AppInstanceType" : {
+      "Description" : "App2 EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.micro",
+      "AllowedValues" : [ "t2.micro", "t2.small", "t2.medium", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge" ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+
+    "KeyNameMGMT": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the Chef and VPN instances",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+
+    "DMZSubnetCIDR" : {
+      "Description" : "CIDR block for DMZ subnet",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "10.225.1.0/24",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "MGMTSubnetCIDR" : {
+      "Description" : "CIDR block for MGMT subnet",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "10.225.6.0/24",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "VPNSubnetCIDR" : {
+      "Description" : "CIDR block for App Servers subnet",
+      "Type": "String",
+      "Default": "10.226.0.0/24",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x x.x.x.x."
+    },
+
+    "App1SubnetCIDR" : {
+      "Description" : "CIDR block for App Servers subnet",
+      "Type": "String",
+      "Default": "10.225.2.0/24",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x x.x.x.x."
+    },
+
+    "App2SubnetCIDR" : {
+      "Description" : "CIDR block for App Servers subnet",
+      "Type": "String",
+      "Default": "10.225.3.0/24",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x x.x.x.x."
+    },
+
+    "NameTag" : {
+      "Default" : "wds-demo",
+      "Type" : "String",
+      "Description" : "Name tag for resources"
+    },
+
+    "SecretsBucketName" : {
+      "Default" : "wds-demo-secret",
+      "Type" : "String",
+      "Description" : "S3 bucket with secrets used in this template"
+    },
+
+    "VPCID" : {
+      "Default" : "vpc-29b8404d",
+      "Type" : "String",
+      "Description" : "S3 bucket with installation files used in this template"
+    },
+
+    "DNSZoneName" : {
+      "Default" : "wdsdev.net",
+      "Type" : "String",
+      "Description" : "DNS Zone name to create hostnames in"
+    },
+
+    "AZa" : {
+      "Type" : "String", 
+      "Default" : "eu-west-1a",
+      "Description" : "Availability zone to create availability zone A subnets"
+    },
+
+    "AZb" : {
+      "Type" : "String", 
+      "Default" : "eu-west-1b",
+      "Description" : "Availability zone to create availability zone B subnet"
+    }
+
+  },
+
+  "Resources" : {
+
+    "IAMAppRole" : {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+           "Version" : "2012-10-17",
+           "Statement": [ {
+              "Effect": "Allow",
+              "Principal": {
+                 "Service": [ "ec2.amazonaws.com" ]
+              },
+              "Action": [ "sts:AssumeRole" ]
+           } ]
+        },
+        "Policies": [ {
+           "PolicyName": { "Fn::Join" : [ "", [ { "Ref" : "NameTag" }, "App-servers" ] ] },
+           "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement":[{
+                "Effect": "Allow",
+                "Action": [
+                       "s3:Get*",
+                       "s3:List*",
+                       "s3:Put*"
+                     ],
+                "Resource": [
+                              { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "SecretsBucketName" }, "/" ] ] },
+                              { "Fn::Join" : [ "", [ "arn:aws:s3:::", { "Ref" : "SecretsBucketName" }, "/*" ] ] }
+                  ]
+               }
+             ]
+           }
+         }]
+       }
+    },
+
+    "IAMAppInstanceProfile" : {
+       "Type": "AWS::IAM::InstanceProfile",
+       "Properties": {
+          "Path": { "Fn::Join" : [ "", [ "/", { "Ref" : "NameTag" }, "/InstanceProfile/" ] ] },
+          "Roles": [ { "Ref" : "IAMAppRole" } ]
+       }
+    },
+
+    "AppInstanceSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPCID" },
+        "GroupDescription" : "Enable SSH access via port 22 and 443,80",
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "VPNSubnetCIDR" }},
+          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "MGMTSubnetCIDR" }},
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "DMZSubnetCIDR" }},
+          { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "DMZSubnetCIDR" }}
+        ]
+      }
+    },
+
+    "App1Instance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Metadata" : {
+        "AWS::CloudFormation::Authentication": {
+            "S3AccessCreds" : {
+                "type": "s3",
+                "buckets": [ { "Ref": "SecretsBucketName" } ],
+                "roleName": { "Ref": "IAMAppRole" }
+            }
+        }
+      },
+      "Properties" : {
+        "ImageId" : "ami-f95ef58a",
+        "InstanceType" : { "Ref" : "AppInstanceType" },
+        "Monitoring" : "false",
+        "KeyName" : { "Ref" : "KeyNameMGMT" },
+        "IamInstanceProfile" : { "Ref" : "IAMAppInstanceProfile" },
+        "Tags" : [  { "Key" : "Environment", "Value" : { "Ref" : "AWS::StackName"} },
+                    { "Key": "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "NameTag" }, "-app1" ] ] } }
+                 ],
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "AppInstanceSecurityGroup" }],
+          "AssociatePublicIpAddress" : "false",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : "subnet-6c1ad31a"
+        }],
+        "SourceDestCheck" : "false"
+      }
+    },
+
+    "App1InstanceDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "DependsOn" : "App1Instance",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Comment" : "DNS name for App1 instance.",
+        "Name" : {
+         "Fn::Join" : [ "", [
+          "app1.",
+          {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "Type" : "A",
+        "TTL" : "60",
+        "ResourceRecords" : [
+          { "Fn::GetAtt" : [ "App1Instance", "PrivateIp" ] }
+        ]
+      }
+    },
+
+    "App2Instance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Metadata" : {
+        "AWS::CloudFormation::Authentication": {
+            "S3AccessCreds" : {
+                "type": "s3",
+                "buckets": [ { "Ref": "SecretsBucketName" } ],
+                "roleName": { "Ref": "IAMAppRole" }
+            }
+        }
+      },
+      "Properties" : {
+        "ImageId" : "ami-f95ef58a",
+        "InstanceType" : { "Ref" : "AppInstanceType" },
+        "Monitoring" : "false",
+        "KeyName" : { "Ref" : "KeyNameMGMT" },
+        "IamInstanceProfile" : { "Ref" : "IAMAppInstanceProfile" },
+        "Tags" : [  { "Key" : "Environment", "Value" : { "Ref" : "AWS::StackName"} },
+                    { "Key": "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "NameTag" }, "-app2" ] ] } }
+                 ],
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "AppInstanceSecurityGroup" }],
+          "AssociatePublicIpAddress" : "false",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : "subnet-06aa0c62"
+        }],
+        "SourceDestCheck" : "false"
+      }
+    },
+
+    "App2InstanceDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "DependsOn" : "App2Instance",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Comment" : "DNS name for App1 instance.",
+        "Name" : {
+         "Fn::Join" : [ "", [
+          "app2.",
+          {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "Type" : "A",
+        "TTL" : "60",
+        "ResourceRecords" : [
+          { "Fn::GetAtt" : [ "App2Instance", "PrivateIp" ] }
+        ]
+      }
+    },
+
+    "DBASubnetGroup" : {
+      "Type" : "AWS::RDS::DBSubnetGroup",
+      "Properties" : {
+        "DBSubnetGroupDescription" : "Subnet available for the RDS DB Instance",
+        "SubnetIds" : [ "subnet-6d1ad31b", "subnet-07aa0c63" ]
+      }
+    },
+
+    "DBBSubnetGroup" : {
+      "Type" : "AWS::RDS::DBSubnetGroup",
+      "Properties" : {
+        "DBSubnetGroupDescription" : "Subnet available for the RDS DB Instance",
+        "SubnetIds" : [ "subnet-07aa0c63", "subnet-6d1ad31b" ]
+      }
+    },
+
+    "DBSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPCID" },
+        "GroupDescription" : "Enable access via port 5432 and access to Sonar Postgre DB",
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "3306", "ToPort" : "3306", "CidrIp" : { "Ref" : "App1SubnetCIDR"}},
+          { "IpProtocol" : "tcp", "FromPort" : "3306", "ToPort" : "3306", "CidrIp" : { "Ref" : "App2SubnetCIDR"}}
+         ]
+      }
+    },
+
+    "DBzoneA" : {
+      "Type" : "AWS::RDS::DBInstance",
+      "Properties" : {
+        "AvailabilityZone" : { "Ref" : "AZa" },
+        "DBName" : "demodb1a",
+        "AllocatedStorage" : "5",
+        "DBInstanceClass" : "db.t2.micro",
+        "DBSubnetGroupName" : { "Ref" : "DBASubnetGroup" },
+        "DBSecurityGroups" : { "Ref" : "DBSecurityGroup" },
+        "DBInstanceIdentifier" : "demodb1",
+        "Engine" : "MySQL",
+        "EngineVersion" : "5.6.27",
+        "MasterUsername" : "demodbuser1",
+        "MasterUserPassword" : "SomeLongStrongPassword1",
+        "MultiAZ" : "false",
+        "Port" : "3306",
+        "Tags" : [{"Key" : "Role", "Value" : "Primary"}] 
+      }
+    },
+
+    "DBzoneB" : {
+      "Type" : "AWS::RDS::DBInstance",
+      "Properties" : {
+        "AvailabilityZone" : { "Ref" : "AZb" },
+        "DBName" : "demodb1b",
+        "AllocatedStorage" : "5",
+        "DBInstanceClass" : "db.t2.micro",
+        "DBSubnetGroupName" :  { "Ref" : "DBBSubnetGroup" },
+        "DBSecurityGroups" : { "Ref" : "DBSecurityGroup" },
+        "DBInstanceIdentifier" : "demodb2",
+        "Engine" : "MySQL",
+        "EngineVersion" : "5.6.27",
+        "MasterUsername" : "demodbuser2",
+        "MasterUserPassword" : "SomeLongStrongPassword2",
+        "MultiAZ" : "false",
+        "Port" : "3306",
+        "Tags" : [{"Key" : "Role", "Value" : "Primary"}] 
+      }
+    },
+
+    "DBzoneADNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Name" : {
+         "Fn::Join" : [ "", [
+          "db1demo.",
+          {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "TTL" : "60",
+        "ResourceRecords" : [
+            {
+                "Fn::GetAtt": [ "DBzoneA", "Endpoint.Address" ]
+            }
+        ],
+        "Type" : "CNAME"
+      },
+      "DependsOn" : "DBzoneA"
+    },
+
+    "DBzoneBDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : {
+          "Fn::Join" : [ "", [
+            { "Ref" : "DNSZoneName" }, "."
+          ] ]
+        },
+        "Name" : {
+         "Fn::Join" : [ "", [
+          "db2demo.",
+          {"Ref" : "DNSZoneName"}, "."
+         ] ]
+        },
+        "TTL" : "60",
+        "ResourceRecords" : [
+            {
+                "Fn::GetAtt": [ "DBzoneB", "Endpoint.Address" ]
+            }
+        ],
+        "Type" : "CNAME"
+      },
+      "DependsOn" : "DBzoneB"
+    }
+
+  },
+
+  "Outputs" : {
+  }
+}
